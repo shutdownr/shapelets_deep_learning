@@ -7,8 +7,9 @@ from shapelet_extraction import get_shapelets_mts
 
 class PNTripletLoss(torch.nn.modules.loss._Loss):
 
-    def __init__(self):
+    def __init__(self, config:dict):
         super(PNTripletLoss, self).__init__()
+        self.config = config
 
     # Encode x
     def _encode(self, x:np.ndarray, encoder:torch.nn.Module):
@@ -50,7 +51,7 @@ class PNTripletLoss(torch.nn.modules.loss._Loss):
         Outputs a double-valued loss with the gradient attached.
         """
         # TODO: Maybe use multiple shapelet lengths?
-        shapelet_lengths = [5]
+        shapelet_lengths = [self.config["l"]]
 
         # Enforced margin
         mu = 0.2
@@ -62,7 +63,7 @@ class PNTripletLoss(torch.nn.modules.loss._Loss):
 
         for shapelet_length in shapelet_lengths:
             # Create shapelets from the multivariate data
-            shapelets = get_shapelets_mts(batch, l=shapelet_length)
+            shapelets = get_shapelets_mts(batch, l=shapelet_length, s=self.config["stride"])
 
             # Cluster the shapelets with kmeans (always 2 clusters, positive and negative)
             n_clusters = 2

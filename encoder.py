@@ -12,7 +12,7 @@ class CausalTruncation(torch.nn.Module):
 
     @param padding Padding to truncate 
     """
-    def __init__(self, padding):
+    def __init__(self, padding:int):
         super(CausalTruncation, self).__init__()
         self.padding = padding
 
@@ -44,7 +44,7 @@ class CausalConvolutionBlock(torch.nn.Module):
     @param out_channels Number of output channels.
     @param kernel_size Kernel size of the applied non-residual convolutions.
     """
-    def __init__(self, in_channels, out_channels, kernel_size, dilation):
+    def __init__(self, in_channels:int, out_channels:int, kernel_size:int, dilation:int):
         super(CausalConvolutionBlock, self).__init__()
         padding = dilation*(kernel_size-1)
 
@@ -90,8 +90,8 @@ class CausalCNN(torch.nn.Module):
     @param out_channels Number of output channels.
     @param kernel_size Kernel size of the applied non-residual convolutions.
     """
-    def __init__(self, in_channels, channels, depth, out_channels,
-                 kernel_size):
+    def __init__(self, in_channels:int, channels:int, depth:int, out_channels:int,
+                 kernel_size:int):
         super(CausalCNN, self).__init__()
 
         # First layer
@@ -136,8 +136,8 @@ class CausalCNNEncoder(torch.nn.Module):
     @param out_channels Number of output channels.
     @param kernel_size Kernel size of the applied non-residual convolutions.
     """
-    def __init__(self, in_channels, channels, depth, reduced_size,
-                 out_channels, kernel_size):
+    def __init__(self, in_channels:int, channels:int, depth:int, reduced_size:int,
+                 out_channels:int, kernel_size:int):
         super(CausalCNNEncoder, self).__init__()
         causal_cnn = CausalCNN(
             in_channels, channels, depth, reduced_size, kernel_size

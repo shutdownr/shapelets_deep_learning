@@ -11,7 +11,7 @@ class Dataset(torch.utils.data.Dataset):
         self.dataset = dataset
 
     def __len__(self):
-        return self.dataset.shape[0]
+        return len(self.dataset)
 
     def __getitem__(self, index:int):
         return self.dataset[index]
@@ -30,7 +30,7 @@ class LabeledDataset(torch.utils.data.Dataset):
         self.labels = labels
 
     def __len__(self):
-        return self.dataset.shape[0]
+        return len(self.dataset)
 
     def __getitem__(self, index:int):
         return self.dataset[index], self.labels[index]

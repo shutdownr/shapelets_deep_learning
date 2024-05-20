@@ -4,7 +4,7 @@ import torch
 from sklearn.cluster import KMeans
 
 # Multivariate time series shapelet extraction function
-def get_shapelets_mts(X:np.ndarray, l:int, s:int=1, return_channels:bool=False, y:np.ndarray=None, return_labels:bool=False):
+def get_shapelets_mts(X:np.ndarray, l:int, s:int=1, return_channels:bool=False, Y:np.ndarray=None, return_labels:bool=False):
     """
     `X` is an ndarray with the shape (`N`, `C`, `L`), where `N` is the
     number of samples, `C` is the number of input channels, and `L` is the length of
@@ -30,6 +30,10 @@ def get_shapelets_mts(X:np.ndarray, l:int, s:int=1, return_channels:bool=False, 
     Note: This function assumes that all input samples have the same number of
     channels and the same length.
     """
+    # Fix for ragged MTS passed as list
+    if type(X) == list:
+        return get_shapelets_ragged_mts(X, l, s, return_channels, Y, return_labels)
+    
     shapelets = np.lib.stride_tricks.sliding_window_view(X, window_shape=l, axis=2)
     out = [shapelets.reshape(-1, shapelets.shape[-1])[::s]]
     if return_channels:
@@ -37,11 +41,31 @@ def get_shapelets_mts(X:np.ndarray, l:int, s:int=1, return_channels:bool=False, 
         shapelet_channels = np.tile(shapelet_channels, X.shape[0])
         out.append(shapelet_channels[::s])
     if return_labels:
-        shapelet_labels = np.tile(y, (shapelets.shape[2], shapelets.shape[1], 1)).T.flatten()
+        shapelet_labels = np.tile(Y, (shapelets.shape[2], shapelets.shape[1], 1)).T.flatten()
         out.append(shapelet_labels[::s])
     return tuple(out) if len(out) > 1 else out[0]
 
-def shapelet_discovery_mts(X:np.ndarray, encoder:torch.nn.Module, num_clusters:int):
+def get_shapelets_ragged_mts(X:list, l:int, s:int=1, return_channels:bool=False, Y:np.ndarray=None, return_labels:bool=False):
+    all_shapelets = []
+    all_channels = []
+    all_labels = []
+    for x,y in zip(X,Y):
+        shapelets = np.lib.stride_tricks.sliding_window_view(x, window_shape=l, axis=1)
+        shapelets = shapelets.reshape(-1, shapelets.shape[-1])
+        all_shapelets.extend(shapelets)
+        if return_channels:
+            channels = np.tile(np.arange(x.shape[0]), x.shape[1]-l+1).reshape(-1,x.shape[0]).T.flatten()
+            all_channels.extend(channels)
+        if return_labels:
+            all_labels.extend(np.tile(y,shapelets.shape[0]))
+    out = [np.array(all_shapelets)[::s]]
+    if return_channels:
+        out.append(np.array(all_channels)[::s])
+    if return_labels:
+        out.append(np.array(all_labels)[::s])
+    return tuple(out) if len(out) > 1 else out[0]
+
+def shapelet_discovery_mts(X:np.ndarray, encoder:torch.nn.Module, config:dict):
     """
     `X` is an ndarray with the shape (`N`, `C`, `L`), where `N` is the
     number of samples, `C` is the number of input channels, and `L` is the length of
@@ -52,21 +76,20 @@ def shapelet_discovery_mts(X:np.ndarray, encoder:torch.nn.Module, num_clusters:i
     `encoder` is a pretrained pytorch Module, trained to encode similar shapelets close
     together in latent space
 
-    `num_clusters` is an integer indicating the number of clusters used for KMeans
+    `config` is the configuration dictionary
     
     Outputs a tuple with
-        (1), a 2D ndarray of shapelets (`S`, `l`), and
-        (2), a 1D ndarray of channels (`S`) respective to each shapelet, where
+        - (1), a 2D ndarray of shapelets (`S`, `l`), and
+        - (2), a 1D ndarray of channels (`S`) respective to each shapelet, where
 
     S=N*C*(L-l+1) is the number of shapelets and l is the shapelet length.
     """
     beta = 0.5
 
     # TODO: Maybe use multiple shapelet lengths?
-    l = 5
 
     # Get shapelets, with their respective channels
-    shapelets, channels = get_shapelets_mts(X, l=l, return_channels=True)
+    shapelets, channels = get_shapelets_mts(X, l=config["l"], s=config["stride"], return_channels=True)
     # Need to add a dimension for the channel to have a tensor of shape (`N`, 1, `l`)
     encoder.eval()
     with torch.no_grad():
@@ -80,7 +103,7 @@ def shapelet_discovery_mts(X:np.ndarray, encoder:torch.nn.Module, num_clusters:i
     # labels = np.concatenate(labels)
 
     # Cluster the encoded shapelets with the number of clusters as passed
-    kmeans = KMeans(n_clusters=num_clusters, n_init="auto")
+    kmeans = KMeans(n_clusters=config["num_clusters"], n_init="auto")
     kmeans.fit(encoded_shapelets)
 
     # Shapelet candidates and their channels
@@ -90,7 +113,7 @@ def shapelet_discovery_mts(X:np.ndarray, encoder:torch.nn.Module, num_clusters:i
     cluster_sizes = []
     candidates_encoded = []
 
-    for i in range(num_clusters):
+    for i in range(config["num_clusters"]):
         # Relevant indices for cluster i
         cluster_indices = kmeans.labels_==i
         # Original indices for the selected shapelets
@@ -110,15 +133,15 @@ def shapelet_discovery_mts(X:np.ndarray, encoder:torch.nn.Module, num_clusters:i
 
     # Get the shapelets sorted by utility
     # Sort shapelet candidates by utility (only relevant if we have more than 1 cluster)
-    if num_clusters > 1:
+    if config["num_clusters"] > 1:
         # For term 1 (maximum cluster size)
         max_cluster_size = np.max(cluster_sizes)
         # For term 2 (sum of normalized distances between encoded candidate and other encoded candidates)
-        normalized_distance_sums = [np.sum([np.linalg.norm(candidates_encoded[i] - c) for c in candidates_encoded]) for i in range(num_clusters)]
+        normalized_distance_sums = [np.sum([np.linalg.norm(candidates_encoded[i] - c) for c in candidates_encoded]) for i in range(config["num_clusters"])]
         max_normalized_distance_sum = np.max(normalized_distance_sums)
         # Utility calculation
         utility = []
-        for i in range(num_clusters):
+        for i in range(config["num_clusters"]):
             utility_term1 = beta * np.log(cluster_sizes[i]) / np.log(max_cluster_size)
             utility_term2 = (1-beta) * np.log(normalized_distance_sums[i]) / np.log(max_normalized_distance_sum)
             utility.append(utility_term1 + utility_term2)
@@ -130,21 +153,3 @@ def shapelet_discovery_mts(X:np.ndarray, encoder:torch.nn.Module, num_clusters:i
         shapelet_channels = np.array(shapelet_channels)[sort_order]
 
     return shapelet_candidates, shapelet_channels
-
-# def _encode_shapelets(shapelets:torch.tensor, encoder:torch.nn.Module):
-#     """
-#     `shapelets` is a tensor with the shape (`N`, `L`), where `N` is the
-#     number of shapelets, and `L` is the length of each shapelet.
-
-#     `y` is an ndarray with the shape (`N`)
-
-#     Outputs a 2D ndarray of encoded shapelets (`N`, `d`), where `d`is the
-#     dimensionality of the latent space
-#     """
-#     # Encode all shapelets
-#     encoder.eval()
-#     with torch.no_grad():
-#         encoded_shapelets = encoder(shapelets)
-#     encoder.train()
-
-#     return encoded_shapelets
