@@ -1,5 +1,39 @@
 import numpy as np
+import torch
 
+class Dataset(torch.utils.data.Dataset):
+    """
+    PyTorch wrapper for a numpy dataset.
+
+    @param dataset Numpy array representing the dataset.
+    """
+    def __init__(self, dataset:np.ndarray):
+        self.dataset = dataset
+
+    def __len__(self):
+        return self.dataset.shape[0]
+
+    def __getitem__(self, index:int):
+        return self.dataset[index]
+
+
+class LabeledDataset(torch.utils.data.Dataset):
+    """
+    PyTorch wrapper for a numpy dataset and its associated labels.
+
+    @param dataset Numpy array representing the dataset.
+    @param labels One-dimensional array of the same length as dataset with
+           non-negative int values.
+    """
+    def __init__(self, dataset:np.ndarray, labels:np.ndarray):
+        self.dataset = dataset
+        self.labels = labels
+
+    def __len__(self):
+        return self.dataset.shape[0]
+
+    def __getitem__(self, index:int):
+        return self.dataset[index], self.labels[index]
 
 def z_normalize(X:np.ndarray):
     """

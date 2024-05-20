@@ -22,8 +22,8 @@ class DataLoader:
             self.mts_datasets = working_datasets
         return self.mts_datasets
 
-    def load_mts_dataset(self, dataset_name):
-        X, y = load_classification(dataset_name)
+    def load_mts_dataset(self, dataset_name:str, split:str=None):
+        X, y = load_classification(dataset_name, split=split)
         _, y = np.unique(y, return_inverse=True)
         return X, y
 
