@@ -36,4 +36,6 @@ def shapelet_transform_mts(X:np.ndarray, shapelets:np.ndarray, channels:np.ndarr
 
 def shapelet_transform_text(X:np.ndarray, shapelets:np.ndarray):
     # TODO: Implement
+    # Should return an ndarray of float features of the shape (N,m)
+    # Where N is the number of instances and m is the output feature dimensionality
     pass

@@ -1,3 +1,5 @@
+from typing import List
+
 import numpy as np
 import torch
 
@@ -71,8 +73,6 @@ def shapelet_discovery_mts(X:np.ndarray, encoder:torch.nn.Module, config:dict):
     number of samples, `C` is the number of input channels, and `L` is the length of
     the input.
 
-    `y` is an ndarray with the shape (`N`)
-
     `encoder` is a pretrained pytorch Module, trained to encode similar shapelets close
     together in latent space
 
@@ -87,9 +87,8 @@ def shapelet_discovery_mts(X:np.ndarray, encoder:torch.nn.Module, config:dict):
     beta = 0.5
 
     # TODO: Maybe use multiple shapelet lengths?
-
     # Get shapelets, with their respective channels
-    shapelets, channels = get_shapelets_mts(X, l=config["l"], s=config["stride"], return_channels=True)
+    shapelets, channels = get_shapelets_mts(X, l=config["l"][0], s=config["stride"], return_channels=True)
     # Need to add a dimension for the channel to have a tensor of shape (`N`, 1, `l`)
     encoder.eval()
     with torch.no_grad():
@@ -153,3 +152,33 @@ def shapelet_discovery_mts(X:np.ndarray, encoder:torch.nn.Module, config:dict):
         shapelet_channels = np.array(shapelet_channels)[sort_order]
 
     return shapelet_candidates, shapelet_channels
+
+
+def shapelet_discovery_text(X:List[str], encoder:torch.nn.Module, config:dict):
+    """
+    `X` is a list of texts
+
+    `y` is an ndarray with the shape (`N`)
+
+    `encoder` is a pretrained pytorch Module, trained to encode similar shapelets close
+    together in latent space
+
+    `config` is the configuration dictionary
+    
+    Outputs a tuple with
+        - (1), a 2D ndarray of shapelets (`S`, `l`), and
+        - (2), a 1D ndarray of channels (`S`) respective to each shapelet, where
+
+    S=N*C*(L-l+1) is the number of shapelets and l is the shapelet length.
+    """
+    # TODO: Implement
+    # See shapelet discovery mts
+
+    # 1. get all shapelets from X
+    # 2. encode all shapelets with the trained encoder
+    # 3. based on config["num_cluster"] get n clusters of all encoded shapelets
+    # 4. for each cluster get the shapelet closest to the cluster center
+    # 5. sort shapelet by utility (I think that's useless, only relevant when using multiple shapelets per cluster)
+    #       => the utility calculation can be done in exactly the same way as for MTS
+    # 6. returns a list of shapelets (or ndarray)
+    pass

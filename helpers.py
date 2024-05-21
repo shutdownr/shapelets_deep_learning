@@ -57,14 +57,17 @@ class EncoderBPE:
             counts = self.tokenizer.fit(texts)
             self.offset = len(self.tokenizer.id2token)
 
-        # counts must be either passed or set by tokenizer.fit(...)
-        assert counts is not None
+        # tokenize texts:
+        ids = self.tokenizer.tokenize(texts)
+
+        if counts is None:
+            counts = np.zeros_like(self.tokenizer.id2token)
+            unique_ids, count_values = np.unique(np.concatenate(ids), return_counts=True)
+            # counts = list(counts)
+            counts[unique_ids] = count_values
         
         # add single elements to pairings:
         self.pairings = []
-
-        # tokenize texts:
-        ids = self.tokenizer.tokenize(texts)
 
         while any([len(txt) > 1 for txt in ids]):
             # find most frequent shapelet:
@@ -84,7 +87,7 @@ class EncoderBPE:
                             key = (shapelet, txt[j+1])
                             if not key in pairings: pairings[key] = []
                             pairings[key].append((i,j))
-
+ 
             # find most frequent pairing:
             pairing, occurances, best_n = None, [], 0
             for key in pairings:
@@ -98,9 +101,12 @@ class EncoderBPE:
             shapelet_id = len(counts)
 
             # update counts:
-            counts.append(best_n)
-            counts[pairing[0]] -= best_n
-            counts[pairing[1]] -= best_n
+            # if pairing[0] == pairing[1]:
+            #     counts.append(int(0.5*best_n))
+            # else:
+            #     counts.append(best_n)
+            # counts[pairing[0]] -= best_n
+            # counts[pairing[1]] -= best_n
 
             # update text:
             for i,j in occurances:
@@ -110,8 +116,16 @@ class EncoderBPE:
             for i in range(len(ids)):
                 ids[i] = [t for t in ids[i] if t >= 0]
 
+            # Dirty fix
+            ids_counted, counts_new = np.unique(np.concatenate(ids), return_counts=True)
+            counts = np.zeros(len(counts)+1)
+            counts[ids_counted] = counts_new
+            if np.max(counts) <= 1:
+                return
+
+
     @property
-    def shapelets(self) -> List[str]:
+    def shapelets(self) -> List[List[int]]:
         shapelets = []
 
         # unzip shaplets:
@@ -126,8 +140,22 @@ class EncoderBPE:
 
             shapelets.append(s)
 
-        return self.tokenizer.detokenize(shapelets)
+        return shapelets
+
+    @property
+    def shapelets_decoded(self) -> List[str]:
+        return self.tokenizer.detokenize(self.shapelets)
     
+    # Filters the shapelets based on a min and max length
+    def get_filtered_shapelets(self, min_length:int=2, max_length:int=10, pad=True) ->  List[List[int]]:
+        filtered_shapelets = [s for s in self.shapelets if len(s)<=max_length and len(s)>=min_length]
+        if pad:
+            padded = np.full((len(filtered_shapelets),max_length),-1,dtype=int)
+            for i, s in enumerate(filtered_shapelets):
+                padded[i,:len(s)] = s
+            return padded
+        return filtered_shapelets
+
     def encode(self, texts:List[str]) -> List[List[int]]:
         # tokenize text:
         ids = self.tokenizer.tokenize(texts)
@@ -177,5 +205,6 @@ if __name__ == '__main__':
     e  = EncoderBPE()
     e.fit(texts=texts)
     print(e.shapelets)
-    print(e.encode(texts))
-    print(e.decode(e.encode(texts)))
+    # print(e.encode(texts))
+    # print(e.decode(e.encode(texts)))
+    print(e.get_filtered_shapelets())
