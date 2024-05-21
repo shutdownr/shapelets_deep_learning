@@ -1,28 +1,18 @@
-from difflib import SequenceMatcher
-
 import numpy as np
 import torch
 
+from difflib import SequenceMatcher
 from sklearn.cluster import AgglomerativeClustering, KMeans
 
-from helpers import Tokenizer,EncoderBPE
-from shapelet_extraction import get_shapelets_mts
+from .text import Tokenizer, EncoderBPE
+from .shapelet_extraction import get_shapelets_mts
 
 class PNTripletLossMTS(torch.nn.modules.loss._Loss):
 
     def __init__(self, config:dict):
-        super(PNTripletLossMTS, self).__init__()
+        super().__init__()
         self.config = config
 
-    # Encode x
-    def _encode(self, x:np.ndarray, encoder:torch.nn.Module):
-        if len(x.shape) == 1:
-            return encoder(x.reshape(1,1,x.shape[0]))
-        elif len(x.shape) == 2:
-            return encoder(x.reshape(x.shape[0],1,x.shape[1]))
-        else:
-            return encoder(x)
-        
     # Get the number of samples to take (maximum 50)
     def _get_nr_of_samples(self, all_samples:int):
         return np.min([50,int(all_samples/5+1)])
@@ -97,7 +87,7 @@ class PNTripletLossMTS(torch.nn.modules.loss._Loss):
 
                 # encode the closest positive shapelet (anchor)
                 # and the other positive shapelets (representatives)
-                positive_shapelets_enc = self._encode(shapelets[positive_indices], encoder)
+                positive_shapelets_enc = encoder(shapelets[positive_indices])
                 x = positive_shapelets_enc[0]
                 positive_representatives = positive_shapelets_enc[1:]
 
@@ -121,7 +111,7 @@ class PNTripletLossMTS(torch.nn.modules.loss._Loss):
                     # Randomly select a sample of k_negative shapelets
                     negative_shapelets = shapelets[kmeans_labels == k]
                     negative_indices = np.random.choice(len(negative_shapelets),k_negative,replace=False)
-                    negative_representatives = self._encode(negative_shapelets[negative_indices], encoder)
+                    negative_representatives = encoder(negative_shapelets[negative_indices])
 
                     # Calculate d_an (mean normalized distance between anchor and negative representatives)
                     dist_cluster_k_negative = torch.sum(torch.linalg.vector_norm(x - negative_representatives, dim=1))
@@ -142,19 +132,9 @@ class PNTripletLossMTS(torch.nn.modules.loss._Loss):
 class PNTripletLossText(torch.nn.modules.loss._Loss):
 
     def __init__(self, config:dict, tokenizer:Tokenizer):
-        super(PNTripletLossText, self).__init__()
+        super().__init__()
         self.config = config
         self.tokenizer = tokenizer
-
-    # Encode x
-    def _encode(self, x:torch.tensor, encoder:torch.nn.Module):
-        x = x.double()
-        if len(x.shape) == 1:
-            return encoder(x.reshape(1,1,x.shape[0]))
-        elif len(x.shape) == 2:
-            return encoder(x.reshape(x.shape[0],1,x.shape[1]))
-        else:
-            return encoder(x)
 
     # Get the number of samples to take (maximum 50)
     def _get_nr_of_samples(self, all_samples:int):
@@ -197,8 +177,9 @@ class PNTripletLossText(torch.nn.modules.loss._Loss):
 
         e = EncoderBPE(self.tokenizer)
         e.fit(batch)
-        shapelets = e.get_filtered_shapelets()
-        
+        shapelets = e.get_filtered_shapelets(**self.config)
+
+        # Calculate similarities:
         similarity_matrix = np.eye(len(shapelets))
         for i, s1 in enumerate(shapelets):
             s1 = s1[s1>0]
@@ -210,8 +191,8 @@ class PNTripletLossText(torch.nn.modules.loss._Loss):
         # Cluster the shapelets with kmeans (always 2 clusters, positive and negative)
         n_clusters = 2
 
-        ag = AgglomerativeClustering(n_clusters,metric="precomputed", linkage="complete").fit(1-similarity_matrix)
-        cluster_labels = ag.labels_
+        clusters = AgglomerativeClustering(n_clusters,metric="precomputed", linkage="complete").fit(1-similarity_matrix)
+        cluster_labels = clusters.labels_
         label,count = np.unique(cluster_labels, return_counts=True)
 
         # Count number of shapelets by cluster
@@ -224,20 +205,30 @@ class PNTripletLossText(torch.nn.modules.loss._Loss):
         for i in range(n_clusters):
             if shapelets_by_cluster[i] < 2:
                 continue
-            # get distances to randomized reference point in positive cluster:
+            # get intra cluster distances:
             positive_mask = cluster_labels == i
-            distance_i = np.random.choice((1-similarity_matrix)[positive_mask,positive_mask])
-            print(distance_i)
+            positive_dist = (1.-similarity_matrix)[positive_mask,:][:,positive_mask]
+
+            # squared distances penalize outliers:
+            positive_dist *= positive_dist
+
+            # get distances to medoid in positive cluster:
+            positive_ref = np.argmin(positive_dist.mean(axis=1))
+            distance_i = positive_dist[positive_ref]
+
+            # get distances to randomized reference point in positive cluster:
+            #positive_ref  = np.random.choice(np.arange(positive_mask.shape[0])[positive_mask])
+            #distance_i = (1.-similarity_matrix)[positive_ref,positive_mask]
 
             # --- POSITIVE CLUSTER ---
             k_positive = self._get_nr_of_samples(shapelets_by_cluster[i])
 
             # get the k closest positive shapelets to the cluster center
-            positive_indices = np.argpartition(distance_i, k_positive)[:(k_positive+1)]
+            positive_indices = np.argpartition(distance_i, k_positive)[:(k_positive + 1)]
 
             # encode the closest positive shapelet (anchor)
             # and the other positive shapelets (representatives)
-            positive_shapelets_enc = self._encode(shapelets[positive_indices], encoder)
+            positive_shapelets_enc = encoder(shapelets[positive_indices])
             x = positive_shapelets_enc[0]
             positive_representatives = positive_shapelets_enc[1:]
 
@@ -261,7 +252,7 @@ class PNTripletLossText(torch.nn.modules.loss._Loss):
                 # Randomly select a sample of k_negative shapelets
                 negative_shapelets = shapelets[cluster_labels == k]
                 negative_indices = np.random.choice(len(negative_shapelets),k_negative,replace=False)
-                negative_representatives = self._encode(negative_shapelets[negative_indices], encoder)
+                negative_representatives = encoder(negative_shapelets[negative_indices])
 
                 # Calculate d_an (mean normalized distance between anchor and negative representatives)
                 dist_cluster_k_negative = torch.sum(torch.linalg.vector_norm(x - negative_representatives, dim=1))

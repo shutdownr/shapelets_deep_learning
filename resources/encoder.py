@@ -149,5 +149,9 @@ class CausalCNNEncoder(torch.nn.Module):
             causal_cnn, max_pooling, squeeze, linear
         )
 
-    def forward(self, x):
-        return self.network(x)
+    def forward(self, x:torch.Tensor):
+        x = x.double()
+
+        if   len(x.shape) == 1: return self.network(x.reshape(1,1,x.shape[0]))
+        elif len(x.shape) == 2: return self.network(x.reshape(x.shape[0],1,x.shape[1]))
+        else: return self.network(x)

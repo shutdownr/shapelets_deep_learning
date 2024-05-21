@@ -1,9 +1,12 @@
-from typing import List
-
 import numpy as np
 import torch
 
-from sklearn.cluster import KMeans
+from difflib import SequenceMatcher
+from sklearn.cluster import AgglomerativeClustering, KMeans
+
+from .text import Tokenizer, EncoderBPE
+
+from typing import List
 
 # Multivariate time series shapelet extraction function
 def get_shapelets_mts(X:np.ndarray, l:int, s:int=1, return_channels:bool=False, Y:np.ndarray=None, return_labels:bool=False):
@@ -92,7 +95,7 @@ def shapelet_discovery_mts(X:np.ndarray, encoder:torch.nn.Module, config:dict):
     # Need to add a dimension for the channel to have a tensor of shape (`N`, 1, `l`)
     encoder.eval()
     with torch.no_grad():
-        encoded_shapelets = encoder(torch.tensor(shapelets).unsqueeze(1))
+        encoded_shapelets = encoder(torch.tensor(shapelets))
     encoder.train()
 
     # Flatten (old code for different shapelet lengths)
@@ -153,8 +156,7 @@ def shapelet_discovery_mts(X:np.ndarray, encoder:torch.nn.Module, config:dict):
 
     return shapelet_candidates, shapelet_channels
 
-
-def shapelet_discovery_text(X:List[str], tokenizer:, encoder:torch.nn.Module, config:dict):
+def shapelet_discovery_text(X:List[str], tokenizer:Tokenizer, encoder:torch.nn.Module, config:dict):
     """
     `X` is a list of texts
 
@@ -171,14 +173,78 @@ def shapelet_discovery_text(X:List[str], tokenizer:, encoder:torch.nn.Module, co
 
     S=N*C*(L-l+1) is the number of shapelets and l is the shapelet length.
     """
+    beta = 0.5
+
     # TODO: Implement
     # See shapelet discovery mts
 
     # 1. get all shapelets from X
+    e = EncoderBPE(tokenizer)
+    e.fit(X)
+    shapelets = e.get_filtered_shapelets(pad=True, **config)
+
     # 2. encode all shapelets with the trained encoder
+    encoder.eval()
+    with torch.no_grad():
+        encoded_shapelets = encoder(torch.tensor(shapelets))
+    encoder.train()
+
     # 3. based on config["num_cluster"] get n clusters of all encoded shapelets
+    similarity_matrix = np.eye(len(shapelets))
+    for i, s1 in enumerate(shapelets):
+        s1 = s1[s1>0]
+        for j, s2 in enumerate(shapelets[:i]):
+            s = SequenceMatcher(None, s1, s2[s2>0]).ratio()
+            similarity_matrix[i,j] = s
+            similarity_matrix[j,i] = s
+
+    clusters = AgglomerativeClustering(n_clusters=config["num_clusters"], metric="precomputed", linkage="complete").fit(1-similarity_matrix)
+    cluster_labels = clusters.labels_
+
     # 4. for each cluster get the shapelet closest to the cluster center
+
+    # Shapelet candidates and their channels
+    shapelet_candidates = []
+    # For utility calculation
+    cluster_sizes = []
+    candidates_encoded = []
+
+    for i in range(config["num_clusters"]):
+        # get intra-cluster-similarities: 
+        cluster_mask = cluster_labels == i
+        cluster_similarities = (1.-similarity_matrix)[cluster_mask,:][:,cluster_mask]
+
+        # squared similarities penalize outliers:
+        cluster_similarities *= cluster_similarities
+
+        # get medoid (i.e. sample with smallest mean distance to all others):
+        cluster_medoid = np.argmin(cluster_similarities.mean(axis=1))
+        cluster_medoid = np.arange(len(shapelets))[cluster_mask][cluster_medoid]
+        shapelet_candidates.append(shapelets[cluster_medoid])
+
+        # Number of shapelets assigned to cluster i
+        cluster_sizes.append(np.sum(cluster_mask))
+        candidates_encoded.append(encoded_shapelets[cluster_medoid])
+
     # 5. sort shapelet by utility (I think that's useless, only relevant when using multiple shapelets per cluster)
     #       => the utility calculation can be done in exactly the same way as for MTS
+    if config["num_clusters"] > 1:
+        # For term 1 (maximum cluster size)
+        max_cluster_size = np.max(cluster_sizes)
+        # For term 2 (sum of normalized distances between encoded candidate and other encoded candidates)
+        normalized_distance_sums = [np.sum([np.linalg.norm(candidates_encoded[i] - c) for c in candidates_encoded]) for i in range(config["num_clusters"])]
+        max_normalized_distance_sum = np.max(normalized_distance_sums)
+        # Utility calculation
+        utility = []
+        for i in range(config["num_clusters"]):
+            utility_term1 = beta * np.log(cluster_sizes[i]) / np.log(max_cluster_size)
+            utility_term2 = (1-beta) * np.log(normalized_distance_sums[i]) / np.log(max_normalized_distance_sum)
+            utility.append(utility_term1 + utility_term2)
+
+        utility = np.array(utility)
+
+        sort_order = np.argsort(-utility)
+        shapelet_candidates = np.array(shapelet_candidates,dtype=object)[sort_order]
+
     # 6. returns a list of shapelets (or ndarray)
-    pass
+    return shapelet_candidates

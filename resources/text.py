@@ -1,7 +1,15 @@
 import numpy as np
+import torch
+import json
+
 from nltk import TreebankWordTokenizer, TreebankWordDetokenizer
 from sklearn.feature_extraction.text import TfidfVectorizer
+
 from typing import List, Tuple, Optional, Union
+
+#====================================================================================================#
+# Classes:                                                                                           #
+#====================================================================================================#
 
 class Tokenizer:
     def __init__(self, convert_parentheses:bool=False) -> None:
@@ -39,10 +47,35 @@ class Tokenizer:
 
     def detokenize(self, ids:List[List[int]]) -> List[str]:
         # decode texts:
-        tokens = [[self.id2token[t] for t in txt] for txt in ids]
+        tokens = [[self.id2token[t] for t in txt if t > 0] for txt in ids]
 
         # detokenize texts:
         return [self._decoder.detokenize(txt, self._convert_parentheses) for txt in tokens]
+    
+    def save(self, path:str) -> None:
+        # create data dictionary:
+        data = {
+            'id2token':self.id2token,
+            'token2id':self.token2id,
+            'convert_parentheses': self._convert_parentheses
+        }
+
+        # write dictionary to disk:
+        with open(path, 'w') as file:
+            json.dump(data, file)
+
+    @staticmethod
+    def load(path:str) -> 'Tokenizer':
+        # load data dictionary:
+        with open(path, 'r') as file:
+            data = json.load(file)
+
+        # create tokenizer object:
+        tokenizer = Tokenizer(convert_parentheses=data['convert_parentheses'])
+        tokenizer.id2token = data['id2token']
+        tokenizer.token2id = data['token2id']
+
+        return tokenizer
 
 class EncoderBPE:
     def __init__(self, tokenizer:Optional[Tokenizer]=None):
@@ -61,9 +94,8 @@ class EncoderBPE:
         ids = self.tokenizer.tokenize(texts)
 
         if counts is None:
-            counts = np.zeros_like(self.tokenizer.id2token)
+            counts = np.zeros(self.offset, dtype=int)
             unique_ids, count_values = np.unique(np.concatenate(ids), return_counts=True)
-            # counts = list(counts)
             counts[unique_ids] = count_values
         
         # add single elements to pairings:
@@ -100,14 +132,6 @@ class EncoderBPE:
             self.pairings.append(pairing)
             shapelet_id = len(counts)
 
-            # update counts:
-            # if pairing[0] == pairing[1]:
-            #     counts.append(int(0.5*best_n))
-            # else:
-            #     counts.append(best_n)
-            # counts[pairing[0]] -= best_n
-            # counts[pairing[1]] -= best_n
-
             # update text:
             for i,j in occurances:
                 ids[i][j] = shapelet_id
@@ -116,13 +140,21 @@ class EncoderBPE:
             for i in range(len(ids)):
                 ids[i] = [t for t in ids[i] if t >= 0]
 
+            # update counts:
+            # if pairing[0] == pairing[1]:
+            #     counts.append(int(0.5*best_n))
+            # else:
+            #     counts.append(best_n)
+            # counts[pairing[0]] -= best_n
+            # counts[pairing[1]] -= best_n
+
             # Dirty fix
             ids_counted, counts_new = np.unique(np.concatenate(ids), return_counts=True)
             counts = np.zeros(len(counts)+1)
             counts[ids_counted] = counts_new
-            if np.max(counts) <= 1:
-                return
 
+            # stop if max token count <= 1:
+            if np.max(counts) <= 1: return
 
     @property
     def shapelets(self) -> List[List[int]]:
@@ -145,15 +177,17 @@ class EncoderBPE:
     @property
     def shapelets_decoded(self) -> List[str]:
         return self.tokenizer.detokenize(self.shapelets)
-    
-    # Filters the shapelets based on a min and max length
-    def get_filtered_shapelets(self, min_length:int=2, max_length:int=10, pad=True) ->  List[List[int]]:
+
+    def get_filtered_shapelets(self, min_length:int=2, max_length:int=10, pad=True, **kwargs) -> List[List[int]]:
+        '''Filters the shapelets based on a min and max length'''
         filtered_shapelets = [s for s in self.shapelets if len(s)<=max_length and len(s)>=min_length]
+
         if pad:
             padded = np.full((len(filtered_shapelets),max_length),-1,dtype=int)
             for i, s in enumerate(filtered_shapelets):
                 padded[i,:len(s)] = s
             return padded
+
         return filtered_shapelets
 
     def encode(self, texts:List[str]) -> List[List[int]]:
@@ -195,6 +229,30 @@ class EncoderBPE:
 
         # detokenize ids:
         return self.tokenizer.detokenize(ids)
+
+#====================================================================================================#
+# Functions:                                                                                         #
+#====================================================================================================#
+
+def shapelet_transform_text(X:np.ndarray, shapelets:np.ndarray, tokenizer: Tokenizer):
+    # TODO: Implement
+    # Should return an ndarray of float features of the shape (N,m)
+    # Where N is the number of instances and m is the output feature dimensionality
+    features = np.zeros((len(X), len(shapelets)), dtype=float)
+
+    # For each sample
+    for i, txt in enumerate(tokenizer.tokenize(X)):
+        # For each discovered shapelet candidate
+        for j, shapelet in enumerate(shapelets):
+            shapelet = shapelet[shapelet>0]
+            features[i,j] = np.inf
+            s_length = len(shapelet)
+            for k in range(len(txt)-s_length+1):
+                distance = np.mean(txt[k:k+s_length] != shapelet.astype(float))
+                if distance < features[i,j]:
+                    features[i,j] = distance
+
+    return features
 
 if __name__ == '__main__':
     texts = [

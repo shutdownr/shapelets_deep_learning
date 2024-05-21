@@ -4,10 +4,10 @@ from sklearn.svm import SVC
 import torch
 
 from resources.encoder import CausalCNNEncoder
-from resources.text import Tokenizer
-from shapelet_extraction import shapelet_discovery_mts, shapelet_discovery_text
-from shapelet_transform import shapelet_transform_mts, shapelet_transform_text
-from triplet_loss import PNTripletLossMTS, PNTripletLossText
+from resources.text import Tokenizer, shapelet_transform_text
+from resources.shapelet_extraction import shapelet_discovery_mts, shapelet_discovery_text
+from resources.shapelet_transform import shapelet_transform_mts
+from resources.triplet_loss import PNTripletLossMTS, PNTripletLossText
 from utils import Dataset
 
 def get_default_config():
@@ -168,13 +168,14 @@ def train_text(X_train:np.array, config:dict, random_state:int=42, debug:bool=Fa
     history = np.array(history)
     return history, encoder, tokenizer
 
-def classify_shapelets_text(X_train:np.ndarray, y_train:np.ndarray, X_test:np.ndarray, y_test:np.ndarray, config:dict, encoder:torch.nn.Module):
+def classify_shapelets_text(X_train:np.ndarray, y_train:np.ndarray, X_test:np.ndarray, y_test:np.ndarray, config:dict, tokenizer:Tokenizer, encoder:torch.nn.Module):
     # Get the best shapelets from the train data
-    shapelets = shapelet_discovery_text(X_train, encoder, config)
+    shapelets = shapelet_discovery_text(X_train, tokenizer, encoder, config)
+    print(tokenizer.detokenize(shapelets))
 
     # Shapelet transform on train and test data
-    features_train = shapelet_transform_text(X_train, shapelets)
-    features_test = shapelet_transform_text(X_test, shapelets)
+    features_train = shapelet_transform_text(X_train, shapelets, tokenizer)
+    features_test = shapelet_transform_text(X_test, shapelets, tokenizer)
 
     # Fit the simple classifier on the train data
     classifier = config["classifier"]
