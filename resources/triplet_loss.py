@@ -137,6 +137,8 @@ class PNTripletLossMTS(torch.nn.modules.loss._Loss):
 
             loss += loss_cluster
         return loss
+
+
 class PNTripletLossText(torch.nn.modules.loss._Loss):
 
     def __init__(self, config:dict, tokenizer:Tokenizer):
@@ -153,11 +155,11 @@ class PNTripletLossText(torch.nn.modules.loss._Loss):
             return encoder(x.reshape(x.shape[0],1,x.shape[1]))
         else:
             return encoder(x)
-        
+
     # Get the number of samples to take (maximum 50)
     def _get_nr_of_samples(self, all_samples:int):
         return np.min([50,int(all_samples/5+1)])
-    
+
     # Get the maximum pairwise normalized distance between the given shapelets
     def _get_pairwise_max_distance(self, shapelets:np.ndarray):
         max_distance = -1
@@ -212,10 +214,8 @@ class PNTripletLossText(torch.nn.modules.loss._Loss):
         cluster_labels = ag.labels_
         label,count = np.unique(cluster_labels, return_counts=True)
 
-
         # Count number of shapelets by cluster
         shapelets_by_cluster = dict(zip(label,count))
-
         shapelets = torch.tensor(shapelets)
 
         # Loss by cluster
@@ -224,11 +224,10 @@ class PNTripletLossText(torch.nn.modules.loss._Loss):
         for i in range(n_clusters):
             if shapelets_by_cluster[i] < 2:
                 continue
-            cluster_mask = cluster_labels == i
-            # cluster_i = shapelets[cluster_mask]
-            indices = np.arange(len(shapelets))[cluster_mask]
-            random_index = np.random.choice(indices)
-            distance_i = (1-similarity_matrix)[random_index,cluster_mask]
+            # get distances to randomized reference point in positive cluster:
+            positive_mask = cluster_labels == i
+            distance_i = np.random.choice((1-similarity_matrix)[positive_mask,positive_mask])
+            print(distance_i)
 
             # --- POSITIVE CLUSTER ---
             k_positive = self._get_nr_of_samples(shapelets_by_cluster[i])

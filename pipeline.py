@@ -3,8 +3,8 @@ import numpy as np
 from sklearn.svm import SVC
 import torch
 
-from encoder import CausalCNNEncoder
-from helpers import EncoderBPE, Tokenizer
+from resources.encoder import CausalCNNEncoder
+from resources.text import Tokenizer
 from shapelet_extraction import shapelet_discovery_mts, shapelet_discovery_text
 from shapelet_transform import shapelet_transform_mts, shapelet_transform_text
 from triplet_loss import PNTripletLossMTS, PNTripletLossText
@@ -132,6 +132,7 @@ def train_text(X_train:np.array, config:dict, random_state:int=42, debug:bool=Fa
     Outputs a tuple with
         - (1), a 1D ndarray of the history of training losses per epoch 
         - (2), a CausalCNNEncoder, the trained encoder network 
+        - (3), a Tokenizer, trained on the data 
     """
     tokenizer = Tokenizer()
     tokenizer.fit(X_train)
@@ -165,7 +166,7 @@ def train_text(X_train:np.array, config:dict, random_state:int=42, debug:bool=Fa
             print("Epoch", i+1, loss.detach().numpy()[0])
         history.append(loss.detach().numpy()[0])
     history = np.array(history)
-    return history, encoder
+    return history, encoder, tokenizer
 
 def classify_shapelets_text(X_train:np.ndarray, y_train:np.ndarray, X_test:np.ndarray, y_test:np.ndarray, config:dict, encoder:torch.nn.Module):
     # Get the best shapelets from the train data

@@ -154,7 +154,7 @@ def shapelet_discovery_mts(X:np.ndarray, encoder:torch.nn.Module, config:dict):
     return shapelet_candidates, shapelet_channels
 
 
-def shapelet_discovery_text(X:List[str], encoder:torch.nn.Module, config:dict):
+def shapelet_discovery_text(X:List[str], tokenizer:, encoder:torch.nn.Module, config:dict):
     """
     `X` is a list of texts
 
