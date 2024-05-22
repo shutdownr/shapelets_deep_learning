@@ -1,11 +1,10 @@
 import numpy as np
-import torch
 import json
 
 from sklearn.feature_extraction.text import TfidfTransformer
 from nltk import TreebankWordTokenizer, TreebankWordDetokenizer
 
-from typing import List, Tuple, Optional, Union
+from typing import List, Optional
 
 #====================================================================================================#
 # Helpers:                                                                                           #
@@ -97,23 +96,17 @@ class EncoderBPE:
         self.offset    = 0 if tokenizer is None else len(tokenizer.id2token)
         self.pairings  = []
 
-    def fit(self, texts:List[str], counts:Optional[List[int]]=None):
+    def fit(self, texts:List[str], counts:Optional[List[int]]=None, verbose:bool=False):
         # fit tokenizer if necessary:
         if self.tokenizer is None:
             self.tokenizer = Tokenizer()
-            counts = self.tokenizer.fit(texts)
+            self.tokenizer.fit(texts)
             self.offset = len(self.tokenizer.id2token)
 
         # tokenize texts:
         ids = self.tokenizer.tokenize(texts)
-
-#        if counts is None:
-#            counts = np.zeros(self.offset, dtype=int)
-#            unique_ids, count_values = np.unique(np.concatenate(ids), return_counts=True)
-#            counts[unique_ids] = count_values
         counts = count_ids(ids, self.offset)
-        #print(counts.shape, type(counts), counts)
-        
+
         # add single elements to pairings:
         self.pairings = []
 
@@ -121,8 +114,14 @@ class EncoderBPE:
             # find most informative shapelet:
             tfidf = TfidfTransformer().fit_transform(counts)
             tfidf = np.asarray(tfidf.sum(axis=0))[0]
-            #print(tfidf.shape, type(tfidf), tfidf)
             s = np.argmax(tfidf)
+
+            # find the most common shapelet:
+            #s = np.argmax(counts.sum(axis=0))
+
+            if verbose:
+                print('Counts:', counts.shape, type(counts), counts)
+                print('TF-IDF:', tfidf.shape, type(tfidf), tfidf)
 
             # find all pairs including the shaplet:
             pairings = {}
@@ -168,14 +167,8 @@ class EncoderBPE:
             # counts[pairing[0]] -= best_n
             # counts[pairing[1]] -= best_n
 
-            # Dirty fix
-            #ids_counted, counts_new = np.unique(np.concatenate(ids), return_counts=True)
-            #counts = np.zeros(len(counts)+1)
-            #counts[ids_counted] = counts_new
+            # ToDo: make more performant:
             counts = count_ids(ids, counts.shape[1] + 1)
-
-            # stop if max token count <= 1:
-            #if np.max(counts) <= 1: return
 
     @property
     def shapelets(self) -> List[List[int]]:
@@ -305,16 +298,3 @@ def shapelet_transform_text(X:np.ndarray, shapelets:np.ndarray, tokenizer: Token
                     features[i,j] = distance
 
     return features
-
-if __name__ == '__main__':
-    texts = [
-        'The “</w>” token at the end of each word is added to identify a word boundary so that the algorithm knows where each word ends. This helps the algorithm to look through each character and find the highest frequency character pairing. I will explain this part in detail later when we will include “</w>” in our byte-pairs.',
-        'Moving on next, we will split each word into characters and count their occurrence. The initial tokens will be all the characters and the “</w>” token.'
-    ] 
-
-    e  = EncoderBPE()
-    e.fit(texts=texts)
-    print(e.shapelets)
-    # print(e.encode(texts))
-    # print(e.decode(e.encode(texts)))
-    print(e.get_filtered_shapelets())
