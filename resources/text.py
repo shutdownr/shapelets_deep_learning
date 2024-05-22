@@ -2,10 +2,24 @@ import numpy as np
 import torch
 import json
 
+from sklearn.feature_extraction.text import TfidfTransformer
 from nltk import TreebankWordTokenizer, TreebankWordDetokenizer
-from sklearn.feature_extraction.text import TfidfVectorizer
 
 from typing import List, Tuple, Optional, Union
+
+#====================================================================================================#
+# Helpers:                                                                                           #
+#====================================================================================================#
+
+def count_ids(ids:List[List[int]], size:int) -> np.ndarray:
+    counts = np.zeros((len(ids), size), dtype=int)
+
+    for i, txt in enumerate(ids):
+        if len(txt) > 0:
+            unique_ids, count_values = np.unique(txt, return_counts=True)
+            counts[i, unique_ids] = count_values
+
+    return counts
 
 #====================================================================================================#
 # Classes:                                                                                           #
@@ -93,17 +107,22 @@ class EncoderBPE:
         # tokenize texts:
         ids = self.tokenizer.tokenize(texts)
 
-        if counts is None:
-            counts = np.zeros(self.offset, dtype=int)
-            unique_ids, count_values = np.unique(np.concatenate(ids), return_counts=True)
-            counts[unique_ids] = count_values
+#        if counts is None:
+#            counts = np.zeros(self.offset, dtype=int)
+#            unique_ids, count_values = np.unique(np.concatenate(ids), return_counts=True)
+#            counts[unique_ids] = count_values
+        counts = count_ids(ids, self.offset)
+        #print(counts.shape, type(counts), counts)
         
         # add single elements to pairings:
         self.pairings = []
 
         while any([len(txt) > 1 for txt in ids]):
-            # find most frequent shapelet:
-            s = np.argmax(counts)
+            # find most informative shapelet:
+            tfidf = TfidfTransformer().fit_transform(counts)
+            tfidf = np.asarray(tfidf.sum(axis=0))[0]
+            #print(tfidf.shape, type(tfidf), tfidf)
+            s = np.argmax(tfidf)
 
             # find all pairs including the shaplet:
             pairings = {}
@@ -126,11 +145,11 @@ class EncoderBPE:
                 n = len(pairings[key])
                 if n > best_n:
                     pairing, occurances, best_n = key, pairings[key], n
-            assert pairing is not None
+            assert pairing is not None, counts[:,s]
 
             # append new shapelet:
             self.pairings.append(pairing)
-            shapelet_id = len(counts)
+            shapelet_id = counts.shape[1]
 
             # update text:
             for i,j in occurances:
@@ -139,6 +158,7 @@ class EncoderBPE:
 
             for i in range(len(ids)):
                 ids[i] = [t for t in ids[i] if t >= 0]
+                if len(ids[i]) == 1: ids[i] = []
 
             # update counts:
             # if pairing[0] == pairing[1]:
@@ -149,12 +169,13 @@ class EncoderBPE:
             # counts[pairing[1]] -= best_n
 
             # Dirty fix
-            ids_counted, counts_new = np.unique(np.concatenate(ids), return_counts=True)
-            counts = np.zeros(len(counts)+1)
-            counts[ids_counted] = counts_new
+            #ids_counted, counts_new = np.unique(np.concatenate(ids), return_counts=True)
+            #counts = np.zeros(len(counts)+1)
+            #counts[ids_counted] = counts_new
+            counts = count_ids(ids, counts.shape[1] + 1)
 
             # stop if max token count <= 1:
-            if np.max(counts) <= 1: return
+            #if np.max(counts) <= 1: return
 
     @property
     def shapelets(self) -> List[List[int]]:
@@ -229,6 +250,37 @@ class EncoderBPE:
 
         # detokenize ids:
         return self.tokenizer.detokenize(ids)
+
+class EncoderTfIdf:
+    def __init__(self, tokenizer:Optional[Tokenizer]=None):
+        self.tokenizer   = tokenizer
+        self.transformer = TfidfTransformer()
+        self.vocab_size  = len(self.tokenizer.id2token)
+
+    def fit(self, texts:List[str], counts:Optional[List[int]]=None):
+        # fit tokenizer if necessary:
+        if self.tokenizer is None:
+            self.tokenizer = Tokenizer()
+            counts = self.tokenizer.fit(texts)
+            self.vocab_size = len(self.tokenizer.id2token)
+
+        # tokenize texts:
+        ids = self.tokenizer.tokenize(texts)
+
+        # fit tfidf:
+        counts = count_ids(ids, self.vocab_size)
+        #print(counts.shape, type(counts), counts)
+        self.transformer.fit(counts)
+
+    def encode(self, texts:List[str]) -> List[List[int]]:
+        # tokenize text:
+        ids = self.tokenizer.tokenize(texts)
+
+        # calculate TfIdf:
+        counts = count_ids(ids, self.vocab_size)
+        #print(counts.shape, type(counts), counts)
+
+        return self.transformer.fit_transform(counts).toarray()
 
 #====================================================================================================#
 # Functions:                                                                                         #

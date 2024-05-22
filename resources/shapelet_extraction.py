@@ -190,41 +190,50 @@ def shapelet_discovery_text(X:List[str], tokenizer:Tokenizer, encoder:torch.nn.M
     encoder.train()
 
     # 3. based on config["num_cluster"] get n clusters of all encoded shapelets
-    similarity_matrix = np.eye(len(shapelets))
-    for i, s1 in enumerate(shapelets):
-        s1 = s1[s1>0]
-        for j, s2 in enumerate(shapelets[:i]):
-            s = SequenceMatcher(None, s1, s2[s2>0]).ratio()
-            similarity_matrix[i,j] = s
-            similarity_matrix[j,i] = s
+    # Cluster the encoded shapelets with the number of clusters as passed
+    clusters = KMeans(n_clusters=config["num_clusters"], n_init="auto")
+    clusters.fit(encoded_shapelets)
 
-    clusters = AgglomerativeClustering(n_clusters=config["num_clusters"], metric="precomputed", linkage="complete").fit(1-similarity_matrix)
-    cluster_labels = clusters.labels_
+#    similarity_matrix = np.eye(len(shapelets))
+#    for i, s1 in enumerate(shapelets):
+#        s1 = s1[s1>0]
+#        for j, s2 in enumerate(shapelets[:i]):
+#            s = SequenceMatcher(None, s1, s2[s2>0]).ratio()
+#            similarity_matrix[i,j] = s
+#            similarity_matrix[j,i] = s
+#
+#    clusters = AgglomerativeClustering(n_clusters=config["num_clusters"], metric="precomputed", linkage="complete").fit(1-similarity_matrix)
 
     # 4. for each cluster get the shapelet closest to the cluster center
 
-    # Shapelet candidates and their channels
+    # Shapelet candidates
     shapelet_candidates = []
     # For utility calculation
     cluster_sizes = []
     candidates_encoded = []
 
     for i in range(config["num_clusters"]):
-        # get intra-cluster-similarities: 
-        cluster_mask = cluster_labels == i
-        cluster_similarities = (1.-similarity_matrix)[cluster_mask,:][:,cluster_mask]
+        # Relevant indices for cluster i
+        cluster_mask = clusters.labels_==i
 
-        # squared similarities penalize outliers:
-        cluster_similarities *= cluster_similarities
+        # Find the shapelet with minimum distance to the cluster center
+        cluster_dist = [np.linalg.norm(q - clusters.cluster_centers_[i]) for q in encoded_shapelets[cluster_mask]]
+        cluster_center = np.argmin(cluster_dist)
 
-        # get medoid (i.e. sample with smallest mean distance to all others):
-        cluster_medoid = np.argmin(cluster_similarities.mean(axis=1))
-        cluster_medoid = np.arange(len(shapelets))[cluster_mask][cluster_medoid]
-        shapelet_candidates.append(shapelets[cluster_medoid])
+#        # get intra-cluster-distances: 
+#        cluster_dist = (1.-similarity_matrix)[cluster_mask,:][:,cluster_mask]
+#
+#        # squared similarities penalize outliers:
+#        cluster_dist *= cluster_dist
+#
+#        # get medoid (i.e. sample with smallest mean distance to all others):
+#        cluster_center = np.argmin(cluster_dist.mean(axis=1))
+        cluster_center = np.arange(len(shapelets))[cluster_mask][cluster_center]
+        shapelet_candidates.append(shapelets[cluster_center])
 
         # Number of shapelets assigned to cluster i
         cluster_sizes.append(np.sum(cluster_mask))
-        candidates_encoded.append(encoded_shapelets[cluster_medoid])
+        candidates_encoded.append(encoded_shapelets[cluster_center ])
 
     # 5. sort shapelet by utility (I think that's useless, only relevant when using multiple shapelets per cluster)
     #       => the utility calculation can be done in exactly the same way as for MTS

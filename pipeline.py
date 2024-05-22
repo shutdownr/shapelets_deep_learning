@@ -4,7 +4,7 @@ from sklearn.svm import SVC
 import torch
 
 from resources.encoder import CausalCNNEncoder
-from resources.text import Tokenizer, shapelet_transform_text
+from resources.text import Tokenizer, EncoderTfIdf, shapelet_transform_text
 from resources.shapelet_extraction import shapelet_discovery_mts, shapelet_discovery_text
 from resources.shapelet_transform import shapelet_transform_mts
 from resources.triplet_loss import PNTripletLossMTS, PNTripletLossText
@@ -98,7 +98,7 @@ def train_mts(X_train:np.array, config:dict, random_state:int=42, debug:bool=Fal
     history = np.array(history)
     return history, encoder
 
-def classify_shapelets_mts(X_train:np.ndarray, y_train:np.ndarray, X_test:np.ndarray, y_test:np.ndarray, config:dict, encoder:torch.nn.Module):
+def classify_shapelets_mts(X_train:np.ndarray, y_train:np.ndarray, X_test:np.ndarray, y_test:np.ndarray, config:dict, encoder:torch.nn.Module, random_state:int=42):
     # Get the best shapelets from the train data
     shapelets, channels = shapelet_discovery_mts(X_train, encoder, config)
 
@@ -108,7 +108,7 @@ def classify_shapelets_mts(X_train:np.ndarray, y_train:np.ndarray, X_test:np.nda
 
     # Fit the simple classifier on the train data
     classifier = config["classifier"]
-    classifier.fit(features_train, y_train)
+    classifier.fit(features_train, y_train, config, random_state=random_state)
     # Evaluate the classifier on the test data
     accuracy = classifier.score(features_test, y_test)
     print("Accuracy:", accuracy)
@@ -168,7 +168,7 @@ def train_text(X_train:np.array, config:dict, random_state:int=42, debug:bool=Fa
     history = np.array(history)
     return history, encoder, tokenizer
 
-def classify_shapelets_text(X_train:np.ndarray, y_train:np.ndarray, X_test:np.ndarray, y_test:np.ndarray, config:dict, tokenizer:Tokenizer, encoder:torch.nn.Module):
+def classify_shapelets_text(X_train:np.ndarray, y_train:np.ndarray, X_test:np.ndarray, y_test:np.ndarray, config:dict, tokenizer:Tokenizer, encoder:torch.nn.Module, random_state:int=42):
     # Get the best shapelets from the train data
     shapelets = shapelet_discovery_text(X_train, tokenizer, encoder, config)
     print(tokenizer.detokenize(shapelets))
@@ -178,12 +178,14 @@ def classify_shapelets_text(X_train:np.ndarray, y_train:np.ndarray, X_test:np.nd
     features_test = shapelet_transform_text(X_test, shapelets, tokenizer)
 
     # Fit the simple classifier on the train data
-    classifier = config["classifier"]
-    classifier.fit(features_train, y_train)
+    classifier = config["classifier"](len(shapelets))
+    history = classifier.fit(features_train, y_train, config, random_state=random_state)
     
     # Evaluate the classifier on the test data
     accuracy = classifier.score(features_test, y_test)
     print("Accuracy:", accuracy)
+
+    return history
 
 def plot_history(history:np.ndarray, filename:str=None):
     """
@@ -195,7 +197,26 @@ def plot_history(history:np.ndarray, filename:str=None):
     plt.plot(history)
     plt.xticks(np.arange(len(history)))
     plt.xlabel("Epoch")
-    plt.ylabel("Triplet Loss")
+    plt.ylabel("Loss")
 
     if filename:
         plt.savefig(filename)
+
+def classify_baseline_text(X_train:np.array, y_train:np.array, X_test:np.array, y_test:np.array, config:dict, random_state:int=42):
+    tokenizer = Tokenizer()
+    tokenizer.fit(X_train)
+
+    # TfIdf transform on train and test data
+    encoder = EncoderTfIdf(tokenizer)
+    features_train = encoder.encode(X_train)
+    features_test = encoder.encode(X_test)
+    
+    # Fit the simple classifier on the train data
+    classifier = config["classifier"](len(tokenizer.id2token))
+    history = classifier.fit(features_train, y_train, config, random_state=random_state)
+
+    # Evaluate the classifier on the test data
+    accuracy = classifier.score(features_test, y_test)
+    print("Accuracy:", accuracy)
+
+    return history
